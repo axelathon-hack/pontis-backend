@@ -13,14 +13,13 @@ import "./libraries/MessageStruct.sol";
 
 contract AxelarSenderAdapter is
     IAxelarGateway,
-    IMessageRecipient,
+    IMessageDispatcher,
     Ownable
 {
-    /// @notice `Mailbox` contract reference.
-    IMailbox public immutable mailbox;
+      /// @notice `Gateway` contract reference.
+    IGateway public immutable gateway;
 
-    /// @notice `IGP` contract reference.
-    IInterchainGasPaymaster public igp;
+    IAxelarGasService public immutable gasService;
 
     uint256 public nonce;
 
@@ -35,12 +34,6 @@ contract AxelarSenderAdapter is
      * @dev dstChainId => dstDomainId.
      */
     mapping(uint256 => uint32) public destinationDomains;
-
-    /**
-     * @notice Emitted when the IGP is set.
-     * @param paymaster The new IGP for this adapter.
-     */
-    event IgpSet(address indexed paymaster);
 
     /**
      * @notice Emitted when a receiver adapter for a destination chain is updated.
@@ -58,14 +51,14 @@ contract AxelarSenderAdapter is
 
     /**
      * @notice HyperlaneSenderAdapter constructor.
-     * @param _mailbox Address of the Hyperlane `Mailbox` contract.
+     * @param _Gateway Address of the Hyperlane `Gateway` contract.
      */
-    constructor(address _mailbox, address _igp) {
-        if (_mailbox == address(0)) {
-            revert Errors.InvalidMailboxZeroAddress();
+    constructor(address _gateway, address _gasService) {
+        if (_gateway == address(0)) {
+            revert Errors.InvalidGatewayZeroAddress();
         }
-        mailbox = IMailbox(_mailbox);
-        _setIgp(_igp);
+        gateway = IGateway(_gateway);
+        gasService = IAxelarGasService(_gasService);
     }
 
     /// @dev we narrow mutability (from view to pure) to remove compiler warnings.
@@ -112,7 +105,7 @@ contract AxelarSenderAdapter is
             revert Errors.UnknownDomainId(_toChainId);
         }
 
-        bytes32 hyperlaneMsgId = IMailbox(mailbox).dispatch(
+        bytes32 hyperlaneMsgId = IGateway(gateway).dispatch(
             dstDomainId,
             TypeCasts.addressToBytes32(receiverAdapter), //receiver adapter is the reciever
             // Include the source chain id so that the receiver doesn't have to maintain a srcDomainId => srcChainId mapping

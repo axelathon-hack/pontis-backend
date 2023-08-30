@@ -7,11 +7,9 @@ import {IAxelarGasService} from "@axelar-network/axelar-cgp-solidity/contracts/i
 import {IAxelarGateway} from "@axelar-network/axelar-gmp-sdk-solidity/contracts/interfaces/IAxelarGateway.sol";
 import {AxelarExecutable} from "@axelar-network/axelar-gmp-sdk-solidity/contracts/executable/AxelarExecutable.sol";
 
-
 // import {Upgradable} from "@axelar-network/axelar-gmp-sdk-solidity/contracts/upgradable/Upgradable.sol";
 // import {StringToAddress, AddressToString} from "@axelar-network/axelar-gmp-sdk-solidity/contracts/utils/AddressString.sol";
 // import {StringToBytes32, Bytes32ToString} from "@axelar-network/axelar-gmp-sdk-solidity/contracts/utils/Bytes32String.sol";
-
 
 import {TypeCasts} from "./libraries/TypeCasts.sol";
 import {Errors} from "./libraries/Errors.sol";
@@ -24,17 +22,9 @@ import "./libraries/MessageStruct.sol";
  * @title HyperlaneReceiverAdapter implementation.
  * @notice `IBridgeReceiverAdapter` implementation that uses Hyperlane as the bridge.
  */
-contract AxelarReceiverAdapter is
-    IMessageExecutor,
-    IMessageExecutable,
-    AxelarExecutable,
-    Ownable
-{
-    /// @notice `Mailbox` contract reference.
-    IMailbox public immutable mailbox;
-
-    /// @notice `ISM` contract reference.
-    IInterchainSecurityModule public ism;
+contract AxelarReceiverAdapter is AxelarExecutable, IMessageExecutor, Ownable {
+   
+    IAxelarGasService public immutable gasService;
 
     /**
      * @notice Sender adapter address for each source chain.
@@ -49,12 +39,6 @@ contract AxelarReceiverAdapter is
     mapping(bytes32 => bool) public executedMessages;
 
     /**
-     * @notice Emitted when the ISM is set.
-     * @param module The new ISM for this adapter/recipient.
-     */
-    event IsmSet(address indexed module);
-
-    /**
      * @notice Emitted when a sender adapter for a source chain is updated.
      * @param srcChainId Source chain identifier.
      * @param senderAdapter Address of the sender adapter.
@@ -64,41 +48,23 @@ contract AxelarReceiverAdapter is
     /* Constructor */
     /**
      * @notice HyperlaneReceiverAdapter constructor.
-     * @param _mailbox Address of the Hyperlane `Mailbox` contract.
+     * @param _gateway Address of the Hyperlane `Gatway` contract.
      */
-    constructor(address _mailbox) {
-        if (_mailbox == address(0)) {
-            revert Errors.InvalidMailboxZeroAddress();
+    constructor(address _gateway,
+        address _gasService) AxelarExecutable(_gateway){
+        if (_gateway == address(0)) {
+            revert Errors.InvalidGatewayZeroAddress();
         }
-        mailbox = IMailbox(_mailbox);
+        gateway = IGateway(_gateway);
     }
 
-    /// @notice Restrict access to trusted `Mailbox` contract.
-    modifier onlyMailbox() {
-        if (msg.sender != address(mailbox)) {
-            revert Errors.UnauthorizedMailbox(msg.sender);
+    /// @notice Restrict access to trusted `Gateway` contract.
+    modifier onlyGateway() {
+        if (msg.sender != address(gateway)) {
+            revert Errors.UnauthorizedGateway(msg.sender);
         }
         _;
     }
-
-    /// @inheritdoc ISpecifiesInterchainSecurityModule
-    function interchainSecurityModule()
-        external
-        view
-        returns (IInterchainSecurityModule)
-    {
-        return ism;
-    }
-
-    /**
-     * @notice Sets the ISM for this adapter/recipient.
-     * @param _ism The ISM contract address.
-     */
-    function setIsm(address _ism) external onlyOwner {
-        ism = IInterchainSecurityModule(_ism);
-        emit IsmSet(_ism);
-    }
-
     function executeMessage(
         address _to,
         bytes calldata message,
@@ -118,16 +84,16 @@ contract AxelarReceiverAdapter is
     }
 
     /**
-     * @notice Called by Hyperlane `Mailbox` contract on destination chain to receive cross-chain messages.
+     * @notice Called by Hyperlane `Gateway` contract on destination chain to receive cross-chain messages.
      * @dev _origin Source chain domain identifier (not currently used).
      * @param _sender Address of the sender on the source chain.
      * @param _body Body of the message.
      */
-    function handle(
+    function execute(
         uint32,
         /* _origin*/ bytes32 _sender,
         bytes memory _body
-    ) external virtual override onlyMailbox {
+    ) external virtual override onlyGateway {
         address adapter = TypeCasts.bytes32ToAddress(_sender);
         (
             uint256 srcChainId,
