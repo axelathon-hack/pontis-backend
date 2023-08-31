@@ -8,18 +8,19 @@ import {IAxelarGateway} from "@axelar-network/axelar-gmp-sdk-solidity/contracts/
 import {TypeCasts} from "./libraries/TypeCasts.sol";
 import {Errors} from "./libraries/Errors.sol";
 import {IMessageDispatcher} from "./interfaces/EIP5164/IMessageDispatcher.sol";
+import {StringToAddress, AddressToString} from "@axelar-network/axelar-gmp-sdk-solidity/contracts/utils/AddressString.sol";
+import {StringToBytes32, Bytes32ToString} from "@axelar-network/axelar-gmp-sdk-solidity/contracts/utils/Bytes32String.sol";
 
 import "./libraries/MessageStruct.sol";
 
-contract AxelarSenderAdapter is
-    IAxelarGateway,
-    IMessageDispatcher,
-    Ownable
-{
-      /// @notice `Gateway` contract reference.
+contract AxelarSenderAdapter is IAxelarGateway, IMessageDispatcher, Ownable {
+    /// @notice `Gateway` contract reference.
     IGateway public immutable gateway;
 
     IAxelarGasService public immutable gasService;
+
+    using StringToAddress for string;
+    using AddressToString for address;
 
     uint256 public nonce;
 
@@ -31,9 +32,9 @@ contract AxelarSenderAdapter is
 
     /**
      * @notice Domain identifier for each destination chain.
-     * @dev dstChainId => dstDomainId.
+     * @dev dstChainId => dstChainName.
      */
-    mapping(uint256 => uint32) public destinationDomains;
+    mapping(uint256 => string) public chainIdToChainName;
 
     /**
      * @notice Emitted when a receiver adapter for a destination chain is updated.
@@ -61,32 +62,48 @@ contract AxelarSenderAdapter is
         gasService = IAxelarGasService(_gasService);
     }
 
-    /// @dev we narrow mutability (from view to pure) to remove compiler warnings.
-    /// @dev unused parameters are added as comments for legibility.
-    function getMessageFee(
-        uint256 toChainId,
-        address,
-        /* to*/ bytes calldata /* data*/
-    ) external view override returns (uint256) {
-        uint32 dstDomainId = _getDestinationDomain(toChainId);
-        // destination gasAmount is hardcoded to 500k similar to Wormhole implementation
-        // See https://docs.hyperlane.xyz/docs/build-with-hyperlane/guides/paying-for-interchain-gas
-        try igp.quoteGasPayment(dstDomainId, 500000) returns (
-            uint256 gasQuote
-        ) {
-            return gasQuote;
-        } catch {
-            // Default to zero, MultiMessageSender.estimateTotalMessageFee doesn't expect this function to revert
-            return 0;
-        }
+    function setChainIdToChainName(
+        string _chainName,
+        uint32 _chainId
+    ) public onlyOwner {
+        chainIdToChainName[_chainId] = _chainName;
     }
 
-    /**
-     * @notice Sets the IGP for this adapter.
-     * @dev See _setIgp.
-     */
-    function setIgp(address _igp) external onlyOwner {
-        _setIgp(_igp);
+    function encodeMessage(
+        address to,
+        bytes memory data,
+        bytes32 messageId,
+        uint256 fromChainId,
+        address from
+    ) internal pure returns (bytes memory) {
+        return
+            abi.encodeCall(
+                IMessageExecutor.executeMessage,
+                (to, data, messageId, fromChainId, from)
+            );
+    }
+
+    function executeMessage(
+        address to,
+        bytes memory data,
+        bytes32 messageId,
+        uint256 fromChainId,
+        address from,
+        bool executedMessageId
+    ) internal {
+        if (executedMessageId) {
+            revert MessageIdAlreadyExecuted(messageId);
+        }
+
+        _requireContract(to);
+
+        (bool _success, bytes memory _returnData) = to.call(
+            abi.encodePacked(data, messageId, fromChainId, from)
+        );
+
+        if (!_success) {
+            revert MessageFailure(messageId, _returnData);
+        }
     }
 
     function dispatchMessage(
@@ -99,30 +116,29 @@ contract AxelarSenderAdapter is
             revert Errors.InvalidAdapterZeroAddress();
         }
         bytes32 msgId = _getNewMessageId(_toChainId, _to);
-        uint32 dstDomainId = _getDestinationDomain(_toChainId);
+        uint32 dstChainName = _getDestinationChainName(_toChainId);
 
-        if (dstDomainId == 0) {
+        if (dstDomainId == "") {
             revert Errors.UnknownDomainId(_toChainId);
         }
 
-        bytes32 hyperlaneMsgId = IGateway(gateway).dispatch(
-            dstDomainId,
-            TypeCasts.addressToBytes32(receiverAdapter), //receiver adapter is the reciever
-            // Include the source chain id so that the receiver doesn't have to maintain a srcDomainId => srcChainId mapping
-            abi.encode(getChainId(), msgId, msg.sender, _to, _data)
+        bytes memory payload = abi.encodeCall(
+            IMessageExecutor.executeMessage,
+            (_to, _data, msgId, getChainId(), msg.sender)
+        );
+        IGasService(gasService).payNativeGasForContractCall{value: msg.value}(
+            address(this), //sender
+            dstChainName, //destination chain
+            receiverAdapter.toString(),
+            payload,
+            msg.sender
         );
 
-        // try to make gas payment, ignore failures
-        // destination gasAmount is hardcoded to 500k similar to Wormhole implementation
-        // refundAddress is set from MMS caller state variable
-        try
-            igp.payForGas{value: msg.value}(
-                hyperlaneMsgId,
-                dstDomainId,
-                500000,
-               address(this)
-            )
-        {} catch {}
+        IGateway(gateway).callContract(
+            dstChainName,
+            receiverAdapter.toString(),
+            payload
+        );
 
         emit MessageDispatched(msgId, msg.sender, _toChainId, _to, _data);
         return msgId;
@@ -144,26 +160,40 @@ contract AxelarSenderAdapter is
         }
     }
 
+    function _getReceiverAdapter(
+        uint256 _toChainID
+    ) internal view returns (address _receiverAdapter) {
+        _receiverAdapter = receiverAdapters[_toChainID];
+    }
+
     /**
      * @notice Updates destination domain identifiers.
      * @param _dstChainIds Destination chain ids array.
      * @param _dstDomainIds Destination domain ids array.
      */
-    function updateDestinationDomainIds(
+    function updateDestinationChainNames(
         uint256[] calldata _dstChainIds,
-        uint32[] calldata _dstDomainIds
+        string[] calldata _dstChainNames
     ) external onlyOwner {
-        if (_dstChainIds.length != _dstDomainIds.length) {
+        if (_dstChainIds.length != _dstChainNames.length) {
             revert Errors.MismatchChainsDomainsLength(
                 _dstChainIds.length,
-                _dstDomainIds.length
+                _dstChainNames.length
             );
         }
         for (uint256 i; i < _dstChainIds.length; ++i) {
-            destinationDomains[_dstChainIds[i]] = _dstDomainIds[i];
-            emit DestinationDomainUpdated(_dstChainIds[i], _dstDomainIds[i]);
+            chainIdToChainName[_dstChainIds[i]] = _dstChainNames[i];
+            emit DestinationDomainUpdated(_dstChainIds[i], _dstChainNames[i]);
         }
     }
+
+    /// @dev Get current chain id
+    function getChainId() public view virtual returns (uint256 cid) {
+        assembly {
+            cid := chainid()
+        }
+    }
+    /* ============ Internal Functions ============ */
 
     /**
      * @notice Returns destination domain identifier for given destination chain id.
@@ -172,19 +202,10 @@ contract AxelarSenderAdapter is
      * @param _dstChainId Destination chain id.
      * @return destination domain identifier.
      */
-    function _getDestinationDomain(
+    function _getDestinationChainName(
         uint256 _dstChainId
     ) internal view returns (uint32) {
-        return destinationDomains[_dstChainId];
-    }
-
-    /**
-     * @dev Sets the IGP for this adapter.
-     * @param _igp The IGP contract address.
-     */
-    function _setIgp(address _igp) internal {
-        igp = IInterchainGasPaymaster(_igp);
-        emit IgpSet(_igp);
+        return chainIdToChainName[_dstChainId];
     }
 
     /**
@@ -207,12 +228,5 @@ contract AxelarSenderAdapter is
             )
         );
         nonce++;
-    }
-
-    /// @dev Get current chain id
-    function getChainId() public view virtual returns (uint256 cid) {
-        assembly {
-            cid := chainid()
-        }
     }
 }

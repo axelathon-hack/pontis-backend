@@ -23,7 +23,6 @@ import "./libraries/MessageStruct.sol";
  * @notice `IBridgeReceiverAdapter` implementation that uses Hyperlane as the bridge.
  */
 contract AxelarReceiverAdapter is AxelarExecutable, IMessageExecutor, Ownable {
-   
     IAxelarGasService public immutable gasService;
 
     /**
@@ -50,8 +49,10 @@ contract AxelarReceiverAdapter is AxelarExecutable, IMessageExecutor, Ownable {
      * @notice HyperlaneReceiverAdapter constructor.
      * @param _gateway Address of the Hyperlane `Gatway` contract.
      */
-    constructor(address _gateway,
-        address _gasService) AxelarExecutable(_gateway){
+    constructor(
+        address _gateway,
+        address _gasService
+    ) AxelarExecutable(_gateway) {
         if (_gateway == address(0)) {
             revert Errors.InvalidGatewayZeroAddress();
         }
@@ -65,6 +66,16 @@ contract AxelarReceiverAdapter is AxelarExecutable, IMessageExecutor, Ownable {
         }
         _;
     }
+
+    /// @notice A modifier used for restricting the caller of some functions to be configured receiver adapters.
+    modifier onlyReceiverAdapter() {
+        require(
+            isTrustedExecutor(msg.sender),
+            "not allowed receiver adapter"
+        );
+        _;
+    }
+
     function executeMessage(
         address _to,
         bytes calldata message,
