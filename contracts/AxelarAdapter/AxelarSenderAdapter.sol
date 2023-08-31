@@ -1,21 +1,23 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 pragma solidity 0.8.17;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-import {IAxelarGasService} from "@axelar-network/axelar-cgp-solidity/contracts/interfaces/IAxelarGasService.sol";
-import {IAxelarGateway} from "@axelar-network/axelar-gmp-sdk-solidity/contracts/interfaces/IAxelarGateway.sol";
+import {IAxelarGasService} from "./interfaces/IAxelarGasService.sol";
+import {IAxelarGateway} from "./interfaces/IAxelarGateway.sol";
 
-import {TypeCasts} from "./libraries/TypeCasts.sol";
 import {Errors} from "./libraries/Errors.sol";
 import {IMessageDispatcher} from "./interfaces/EIP5164/IMessageDispatcher.sol";
-import {StringToAddress, AddressToString} from "@axelar-network/axelar-gmp-sdk-solidity/contracts/utils/AddressString.sol";
-import {StringToBytes32, Bytes32ToString} from "@axelar-network/axelar-gmp-sdk-solidity/contracts/utils/Bytes32String.sol";
+import {IMessageExecutor} from "./interfaces/EIP5164/IMessageExecutor.sol";
+
+import {StringToAddress, AddressToString} from "./libraries/AddressString.sol";
+import {StringToBytes32, Bytes32ToString} from "./libraries/Bytes32String.sol";
 
 import "./libraries/MessageStruct.sol";
 
 contract AxelarSenderAdapter is IAxelarGateway, IMessageDispatcher, Ownable {
     /// @notice `Gateway` contract reference.
-    IGateway public immutable gateway;
+    IAxelarGateway public immutable gateway;
 
     IAxelarGasService public immutable gasService;
 
@@ -46,19 +48,19 @@ contract AxelarSenderAdapter is IAxelarGateway, IMessageDispatcher, Ownable {
     /**
      * @notice Emitted when a domain identifier for a destination chain is updated.
      * @param dstChainId Destination chain identifier.
-     * @param dstDomainId Destination domain identifier.
+     * @param dstChainName Destination domain identifier.
      */
-    event DestinationDomainUpdated(uint256 dstChainId, uint32 dstDomainId);
+    event DestinationDomainUpdated(uint256 dstChainId, string dstChainName);
 
     /**
-     * @notice HyperlaneSenderAdapter constructor.
-     * @param _Gateway Address of the Hyperlane `Gateway` contract.
+     * @notice AxelarSenderAdapter constructor.
+     * @param _gateway Address of the Axelar `Gateway` contract.
      */
     constructor(address _gateway, address _gasService) {
         if (_gateway == address(0)) {
             revert Errors.InvalidGatewayZeroAddress();
         }
-        gateway = IGateway(_gateway);
+        gateway = IAxelarGateway(_gateway);
         gasService = IAxelarGasService(_gasService);
     }
 
@@ -67,43 +69,6 @@ contract AxelarSenderAdapter is IAxelarGateway, IMessageDispatcher, Ownable {
         uint32 _chainId
     ) public onlyOwner {
         chainIdToChainName[_chainId] = _chainName;
-    }
-
-    function encodeMessage(
-        address to,
-        bytes memory data,
-        bytes32 messageId,
-        uint256 fromChainId,
-        address from
-    ) internal pure returns (bytes memory) {
-        return
-            abi.encodeCall(
-                IMessageExecutor.executeMessage,
-                (to, data, messageId, fromChainId, from)
-            );
-    }
-
-    function executeMessage(
-        address to,
-        bytes memory data,
-        bytes32 messageId,
-        uint256 fromChainId,
-        address from,
-        bool executedMessageId
-    ) internal {
-        if (executedMessageId) {
-            revert MessageIdAlreadyExecuted(messageId);
-        }
-
-        _requireContract(to);
-
-        (bool _success, bytes memory _returnData) = to.call(
-            abi.encodePacked(data, messageId, fromChainId, from)
-        );
-
-        if (!_success) {
-            revert MessageFailure(messageId, _returnData);
-        }
     }
 
     function dispatchMessage(
@@ -116,9 +81,9 @@ contract AxelarSenderAdapter is IAxelarGateway, IMessageDispatcher, Ownable {
             revert Errors.InvalidAdapterZeroAddress();
         }
         bytes32 msgId = _getNewMessageId(_toChainId, _to);
-        uint32 dstChainName = _getDestinationChainName(_toChainId);
+        string dstChainName = _getDestinationChainName(_toChainId);
 
-        if (dstDomainId == "") {
+        if (dstChainName == "") {
             revert Errors.UnknownDomainId(_toChainId);
         }
 
@@ -126,7 +91,7 @@ contract AxelarSenderAdapter is IAxelarGateway, IMessageDispatcher, Ownable {
             IMessageExecutor.executeMessage,
             (_to, _data, msgId, getChainId(), msg.sender)
         );
-        IGasService(gasService).payNativeGasForContractCall{value: msg.value}(
+        IAxelarGasService(gasService).payNativeGasForContractCall{value: msg.value}(
             address(this), //sender
             dstChainName, //destination chain
             receiverAdapter.toString(),
@@ -134,7 +99,7 @@ contract AxelarSenderAdapter is IAxelarGateway, IMessageDispatcher, Ownable {
             msg.sender
         );
 
-        IGateway(gateway).callContract(
+        IAxelarGateway(gateway).callContract(
             dstChainName,
             receiverAdapter.toString(),
             payload
@@ -169,7 +134,7 @@ contract AxelarSenderAdapter is IAxelarGateway, IMessageDispatcher, Ownable {
     /**
      * @notice Updates destination domain identifiers.
      * @param _dstChainIds Destination chain ids array.
-     * @param _dstDomainIds Destination domain ids array.
+     * @param _dstChainNames Destination domain ids array.
      */
     function updateDestinationChainNames(
         uint256[] calldata _dstChainIds,

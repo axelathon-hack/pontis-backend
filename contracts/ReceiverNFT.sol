@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 pragma solidity 0.8.17;
 
 import {AxelarReceiverAdapter} from "./AxelarAdapter/AxelarReceiverAdapter.sol";
@@ -8,7 +9,7 @@ import {IMultiChainNFT} from "./IMultiChainNFT.sol";
 
 contract ReceiverNFT is
     ERC721URIStorage,
-    HyperlaneReceiverAdapter,
+    AxelarReceiverAdapter,
     IMultiChainNFT
 {
     using Counters for Counters.Counter;
@@ -30,10 +31,15 @@ contract ReceiverNFT is
         address _collectionOwner
     ) {}
 
-    function handle(
+    function _execute(
         uint32 _origin, bytes32 _sender,
         bytes memory _body
-    ) external override onlyMailbox {
+    ) external override onlyGateway {
         super.handle(_origin, _sender, _body);
            }
+
+     function mintAfterBurn(bytes calldata _payload) internal {
+          
+    }
+
 }

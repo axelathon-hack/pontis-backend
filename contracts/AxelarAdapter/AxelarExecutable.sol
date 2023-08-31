@@ -2,8 +2,8 @@
 
 pragma solidity ^0.8.0;
 
-import { IAxelarGateway } from '../interfaces/IAxelarGateway.sol';
-import { IAxelarExecutable } from '../interfaces/IAxelarExecutable.sol';
+import { IAxelarGateway } from './interfaces/IAxelarGateway.sol';
+import { IAxelarExecutable } from './interfaces/IAxelarExecutable.sol';
 
 contract AxelarExecutable is IAxelarExecutable {
     IAxelarGateway public immutable gateway;

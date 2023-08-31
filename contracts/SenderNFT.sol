@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 pragma solidity 0.8.17;
 
 import {AxelarSenderAdapter} from "./AxelarAdapter/AxelarSenderAdapter.sol";
@@ -7,7 +8,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 import {IMultiChainNFT} from "./IMultiChainNFT.sol";
 
-contract SenderNFT is ERC721URIStorage, HyperlaneSenderAdapter, IMultiChainNFT {
+contract SenderNFT is ERC721URIStorage, AxelarSenderAdapter, IMultiChainNFT {
     using Counters for Counters.Counter;
     Counters.Counter private _tokenIds;
     address collectionOwner;
@@ -28,7 +29,7 @@ contract SenderNFT is ERC721URIStorage, HyperlaneSenderAdapter, IMultiChainNFT {
         string memory _symbol,
         address _mailbox,
         address _igp
-    ) ERC721(_name, _symbol) HyperlaneSenderAdapter(_mailbox, _igp) {
+    ) ERC721(_name, _symbol) AxelarSenderAdapter(_mailbox, _igp) {
         collectionOwner = msg.sender;
     }
 
@@ -64,29 +65,30 @@ contract SenderNFT is ERC721URIStorage, HyperlaneSenderAdapter, IMultiChainNFT {
         address _recipient
     ) public payable {
        
+       IMultiChainNFT receiverAdapter = IMultiChainNFT(_recipient);
+
         require(_ownerOf(_tokenId) == msg.sender, "caller is not the owner");
         TransferParams memory transferParams;
         transferParams.nftId = _tokenId;
-        transferParams.recipient = TypeCasts.addressToBytes32(recipient);
+        transferParams.recipient = _recipient;
         transferParams.uri = super.tokenURI(_tokenId);
         // burning the NFTs from the address of the user calling _burnBatch function
         _burn(transferParams.nftId);
 
         // sending the transfer params struct to the destination chain as payload.
-        bytes memory packet = abi.encode(transferParams);
+        bytes memory payload = abi.encode(transferParams);
 
-        bytes32 hyperlaneMsgId = IMailbox(mailbox).dispatch(destChainId, TypeCasts.addressToBytes32(recipient), packet);
+        // Encode the function call.
+        bytes memory targetData = abi.encodeCall(
+            receiverAdapter.mintAfterBurn,
+            _tokenURI,
+            payload
+        );
 
-         try
-            igp.payForGas{value: msg.value}(
-                hyperlaneMsgId,
-                dstDomainId,
-                500000,
-               address(this)
-            )
-        {} catch {}
+         dispatchMessage(_toChainId, receiverAdapter, targetData);
     }
 
+   
     function mintRemote(
         uint256 _toChainId,
         address _to,
@@ -100,6 +102,6 @@ contract SenderNFT is ERC721URIStorage, HyperlaneSenderAdapter, IMultiChainNFT {
             _tokenURI
         );
 
-        dispatchMessage(_toChainId, _to, targetData);
+        dispatchMessage(_toChainId, receiverAdapter, targetData);
     }
 }

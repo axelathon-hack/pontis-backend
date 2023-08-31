@@ -5,6 +5,29 @@ __metadata:
   version: 6
   cacheKey: 8
 
+"@axelar-network/axelar-cgp-solidity@npm:^5.0.1":
+  version: 5.0.1
+  resolution: "@axelar-network/axelar-cgp-solidity@npm:5.0.1"
+  dependencies:
+    "@axelar-network/axelar-gmp-sdk-solidity": ^4.0.2
+  checksum: 9116186a3e509414b6a58e8c43ec4774bba03127f711e28bd3e3cd5acc285c7741fb95309fe94145ba8481516375048a030bffa78d138fe125a52a1f9bf9b3d3
+  languageName: node
+  linkType: hard
+
+"@axelar-network/axelar-gmp-sdk-solidity@npm:^4.0.2":
+  version: 4.0.3
+  resolution: "@axelar-network/axelar-gmp-sdk-solidity@npm:4.0.3"
+  checksum: 19369dfe1dc21bd09ae87de9f691fdb18289f637eb3ec53beb1b3d0f72f26812a792a00b16e33a658282ef3fb1dbcd268100a7438b232581c1c7e1e08aacf31b
+  languageName: node
+  linkType: hard
+
+"@axelar-network/axelar-gmp-sdk-solidity@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@axelar-network/axelar-gmp-sdk-solidity@npm:5.3.0"
+  checksum: 9fac9e265cccecd8048fc6909a4c90dcf80b2b79a3cf232e9c5203fa184fc7e6d31e6ce44685aa77ddf4f0a969941c39b71258ddc007b929a2022486aec4c6f7
+  languageName: node
+  linkType: hard
+
 "@chainsafe/as-sha256@npm:^0.3.1":
   version: 0.3.1
   resolution: "@chainsafe/as-sha256@npm:0.3.1"
@@ -2545,6 +2568,8 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "eip-5164-adapter@workspace:."
   dependencies:
+    "@axelar-network/axelar-cgp-solidity": ^5.0.1
+    "@axelar-network/axelar-gmp-sdk-solidity": ^5.3.0
     "@ethersproject/abi": ^5.4.7
     "@ethersproject/providers": ^5.4.7
     "@hyperlane-xyz/core": ^1.4.2

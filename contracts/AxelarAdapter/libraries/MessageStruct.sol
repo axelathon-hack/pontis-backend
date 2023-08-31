@@ -27,7 +27,7 @@ library MessageStruct {
                 _message.dstChainId,
                 _message.nonce,
                 _message.target,
-                _message.callData,
+                _message.callData
             )
         );
     }

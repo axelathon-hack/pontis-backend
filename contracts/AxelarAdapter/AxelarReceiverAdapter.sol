@@ -3,27 +3,28 @@ pragma solidity 0.8.17;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-import {IAxelarGasService} from "@axelar-network/axelar-cgp-solidity/contracts/interfaces/IAxelarGasService.sol";
-import {IAxelarGateway} from "@axelar-network/axelar-gmp-sdk-solidity/contracts/interfaces/IAxelarGateway.sol";
-import {AxelarExecutable} from "@axelar-network/axelar-gmp-sdk-solidity/contracts/executable/AxelarExecutable.sol";
+import {IAxelarGasService} from "./interfaces/IAxelarGasService.sol";
+import {IAxelarGateway} from "./interfaces/IAxelarGateway.sol";
+import {AxelarExecutable} from "./AxelarExecutable.sol";
 
-// import {Upgradable} from "@axelar-network/axelar-gmp-sdk-solidity/contracts/upgradable/Upgradable.sol";
-// import {StringToAddress, AddressToString} from "@axelar-network/axelar-gmp-sdk-solidity/contracts/utils/AddressString.sol";
-// import {StringToBytes32, Bytes32ToString} from "@axelar-network/axelar-gmp-sdk-solidity/contracts/utils/Bytes32String.sol";
+import {StringToAddress, AddressToString} from "./libraries/AddressString.sol";
+import {StringToBytes32, Bytes32ToString} from "./libraries/Bytes32String.sol";
 
-import {TypeCasts} from "./libraries/TypeCasts.sol";
 import {Errors} from "./libraries/Errors.sol";
 
-import {IMessageExecutor} from "./interfaces/EIP5164/IMessageDispatcher.sol";
+import {IMessageExecutor} from "./interfaces/EIP5164/IMessageExecutor.sol";
 
 import "./libraries/MessageStruct.sol";
 
 /**
- * @title HyperlaneReceiverAdapter implementation.
- * @notice `IBridgeReceiverAdapter` implementation that uses Hyperlane as the bridge.
+ * @title AxelarReceiverAdapter implementation.
+ * @notice `IBridgeReceiverAdapter` implementation that uses Axelar as the bridge.
  */
 contract AxelarReceiverAdapter is AxelarExecutable, IMessageExecutor, Ownable {
     IAxelarGasService public immutable gasService;
+
+    using StringToAddress for string;
+    using AddressToString for address;
 
     /**
      * @notice Sender adapter address for each source chain.
@@ -46,8 +47,8 @@ contract AxelarReceiverAdapter is AxelarExecutable, IMessageExecutor, Ownable {
 
     /* Constructor */
     /**
-     * @notice HyperlaneReceiverAdapter constructor.
-     * @param _gateway Address of the Hyperlane `Gatway` contract.
+     * @notice AxelarReceiverAdapter constructor.
+     * @param _gateway Address of the Axelar `Gatway` contract.
      */
     constructor(
         address _gateway,
@@ -56,7 +57,6 @@ contract AxelarReceiverAdapter is AxelarExecutable, IMessageExecutor, Ownable {
         if (_gateway == address(0)) {
             revert Errors.InvalidGatewayZeroAddress();
         }
-        gateway = IGateway(_gateway);
     }
 
     /// @notice Restrict access to trusted `Gateway` contract.
@@ -67,52 +67,59 @@ contract AxelarReceiverAdapter is AxelarExecutable, IMessageExecutor, Ownable {
         _;
     }
 
-    /// @notice A modifier used for restricting the caller of some functions to be configured receiver adapters.
-    modifier onlyReceiverAdapter() {
-        require(
-            isTrustedExecutor(msg.sender),
-            "not allowed receiver adapter"
-        );
-        _;
-    }
+    // /// @notice A modifier used for restricting the caller of some functions to be configured receiver adapters.
+    // modifier onlyReceiverAdapter() {
+    //     require(
+    //         isTrustedExecutor(msg.sender),
+    //         "only trusted receiver adapters allowed"
+    //     );
+    //     _;
+    // }
 
     function executeMessage(
         address _to,
-        bytes calldata message,
+        bytes calldata data,
         bytes32 messageId,
         uint256 fromChainId,
         address from
     ) internal {
-        (bool success, bytes memory returnData) = _to.call(
-            abi.encodePacked(message, messageId, fromChainId, from)
+        // if(executedMessages[messageId]) {
+        //     revert MessageIdAlreadyExecuted(messageId);
+        // }
+
+        (bool _success, bytes memory _returnData) = _to.call(
+            abi.encodePacked(data, messageId, fromChainId, from)
         );
 
-        if (!success) {
-            revert MessageFailure(messageId, returnData);
+        if (!_success) {
+            revert MessageFailure(messageId, _returnData);
         }
+
+        //executedMessages[messageId] = true;
 
         emit MessageIdExecuted(fromChainId, messageId);
     }
 
     /**
-     * @notice Called by Hyperlane `Gateway` contract on destination chain to receive cross-chain messages.
-     * @dev _origin Source chain domain identifier (not currently used).
-     * @param _sender Address of the sender on the source chain.
-     * @param _body Body of the message.
+     * @notice Called by Axelar `Gateway` contract on destination chain to receive cross-chain messages.
+     * @dev sourceChain Source chain domain identifier (not currently used).
+     * @param sourceAddress Address of the sender on the source chain.
+     * @param _payload Body of the message.
      */
-    function execute(
-        uint32,
-        /* _origin*/ bytes32 _sender,
-        bytes memory _body
-    ) external virtual override onlyGateway {
-        address adapter = TypeCasts.bytes32ToAddress(_sender);
+    function _execute(
+        string calldata /*sourceChain*/,
+        string calldata sourceAddress,
+        bytes calldata _payload
+    ) internal virtual override {
+        //address adapter = TypeCasts.bytes32ToAddress(_sender);
+        address adapter = sourceAddress.toAddress(sourceAddress);
         (
-            uint256 srcChainId,
-            bytes32 msgId,
-            address srcSender,
             address destReceiver,
-            bytes memory data
-        ) = abi.decode(_body, (uint256, bytes32, address, address, bytes));
+            bytes data,
+            bytes32 msgId,
+            uint256 srcChainId,
+            address memory srcSender
+        ) = abi.decode(_payload, (address, bytes, bytes32, uint256, address));
 
         if (adapter != senderAdapters[srcChainId]) {
             revert Errors.UnauthorizedAdapter(srcChainId, adapter);
